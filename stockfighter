@@ -1,0 +1,16 @@
+#!/usr/bin/env php
+<?php
+
+// Composer autoload.
+require __DIR__ . '/vendor/autoload.php';
+
+// Included classes.
+use Symfony\Component\Console\Application;
+use Marks\StockfighterSolution\Levels\ChockABlock;
+
+// Initialize the application.
+$application = new Application('Stockfighter Solutions');
+$application->add(new ChockABlock());
+$application->run();
+
+?>

@@ -6,6 +6,7 @@
     },
     "require": {
         "sammarks/stockfighter": "dev-master",
-        "symfony/console": "^3.0"
+        "symfony/console": "^3.0",
+        "caseyamcl/Configula": "^2.4"
     }
 }

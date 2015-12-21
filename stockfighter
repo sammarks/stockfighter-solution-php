@@ -5,11 +5,19 @@
 require __DIR__ . '/vendor/autoload.php';
 
 // Included classes.
-use Symfony\Component\Console\Application;
+use Marks\StockfighterSolution\Application;
 use Marks\StockfighterSolution\Levels\ChockABlock;
+use Configula\Config;
+
+// Load the configuration.
+$config = new Config(__DIR__ . '/config');
+
+// Set the API key.
+\Marks\Stockfighter\Stockfighter::setApiKey($config->key);
 
 // Initialize the application.
 $application = new Application('Stockfighter Solutions');
+$application->setConfig($config);
 $application->add(new ChockABlock());
 $application->run();
 

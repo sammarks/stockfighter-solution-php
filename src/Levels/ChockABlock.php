@@ -83,23 +83,8 @@ class ChockABlock extends Command
 			}
 			if ($quote->last <= $target_price + self::LAST_THRESHOLD && microtime(true) > $last + self::WAIT) {
 				$to_purchase = $stocks_left > self::STOCKS_PER_PURCHASE ? self::STOCKS_PER_PURCHASE : $stocks_left;
-				$output->write('Purchasing ' . $to_purchase . ' shares of ' . $stock . '...');
-				$filled = 0;
-				while ($filled === 0) {
-					$order = null;
-					$output->write('.');
-					try {
-						$order = $this->stock($input)
-							->order($account, 0, self::STOCKS_PER_PURCHASE, Order::DIRECTION_BUY, Order::ORDER_MARKET);
-					} catch (StockfighterRequestException $ex) {
-						$output->writeln('<error>Failed.</error>');
-						print_r($ex->body);
-						break;
-					}
-					$filled = $order->totalFilled;
-				}
-				$output->writeln('<info> ' . $filled . ' filled.</info>');
-				$stocks_left -= $filled;
+				$order = $this->order($output, 0, $to_purchase);
+				$stocks_left -= $order->totalFilled;
 				$last = microtime(true);
 			}
 

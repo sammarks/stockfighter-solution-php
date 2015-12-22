@@ -10,6 +10,7 @@ use Symfony\Component\Console\Command\Command as SymfonyCommand;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
+use WebSocket\ConnectionException;
 
 class Command extends SymfonyCommand
 {
@@ -32,10 +33,22 @@ class Command extends SymfonyCommand
 	protected $stock = false;
 
 	/**
+	 * Whether or not to include the stock argument.
+	 * @var bool
+	 */
+	protected $stock_argument = true;
+
+	/**
 	 * The name of the account for this command.
 	 * @var string|bool
 	 */
 	protected $account = false;
+
+	/**
+	 * Whether or not to include the account argument.
+	 * @var bool
+	 */
+	protected $account_argument = true;
 
 	public function __construct($name = null)
 	{
@@ -46,6 +59,14 @@ class Command extends SymfonyCommand
 	protected function configure()
 	{
 		$this->addArgument('venue', InputArgument::REQUIRED, 'The name of the venue for the level.');
+
+		if ($this->stock_argument) {
+			$this->addArgument('stock', InputArgument::REQUIRED, 'The name of the stock.');
+		}
+
+		if ($this->account_argument) {
+			$this->addArgument('account', InputArgument::REQUIRED, 'The name of the account.');
+		}
 	}
 
 	protected function execute(InputInterface $input, OutputInterface $output)
@@ -160,5 +181,43 @@ class Command extends SymfonyCommand
 		}
 		$output->writeln('<info> ' . $filled . ' filled.</info>');
 		return $order;
+	}
+
+	/**
+	 * Creates a websocket connection and listens for quotes, calling
+	 * $received_callback every time a new quote is received.
+	 *
+	 * If $received_callback returns anything that evaluates to true,
+	 * the returned result is returned from this method.
+	 *
+	 * @param OutputInterface $output
+	 * @param callable        $received_callback
+	 *
+	 * @return mixed
+	 */
+	protected function quotes(OutputInterface $output, callable $received_callback)
+	{
+		$output->write('Connecting to websockets... ');
+		$websocket = $this->stockfighter->getWebSocketCommunicator()
+			->quotes($this->account, $this->venue, $this->stock);
+		$websocket->connect();
+		$output->writeln('<info>ok.</info>');
+
+		while (true) {
+			$quote = null;
+			try {
+				$quote = $websocket->receive();
+			} catch (ConnectionException $ex) {
+				$output->writeln('<comment>Connection lost. Reconnecting...</comment>');
+				$websocket->connect();
+				continue;
+			}
+			$result = $received_callback($quote);
+			if ($result) {
+				return $result; // Return the result if we have one.
+			}
+		}
+
+		return null;
 	}
 }

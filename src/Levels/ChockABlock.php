@@ -2,10 +2,8 @@
 
 namespace Marks\StockfighterSolution\Levels;
 
-use Marks\Stockfighter\Exceptions\StockfighterRequestException;
-use Marks\Stockfighter\Objects\Order;
+use Marks\Stockfighter\Objects\Quote;
 use Marks\StockfighterSolution\Command;
-use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use WebSocket\ConnectionException;
@@ -22,34 +20,17 @@ class ChockABlock extends Command
 		parent::configure();
 
 		$this->setName('level:chock-a-block')
-			->setDescription('Run the chock-a-block solution (level 2).')
-			->addArgument('account', InputArgument::REQUIRED, 'The account name.')
-			->addArgument('stock', InputArgument::REQUIRED, 'The name of the stock to purchase.');
-	}
-
-	/**
-	 * Gets the stock path object.
-	 *
-	 * @param InputInterface $input
-	 *
-	 * @return \Marks\Stockfighter\Paths\Stock
-	 * @throws \Marks\StockfighterSolution\Exceptions\StockfighterSolutionException
-	 */
-	protected function stock(InputInterface $input)
-	{
-		return $this->venue()->stock($input->getArgument('stock'));
+			->setDescription('Run the chock-a-block solution (level 2).');
 	}
 
 	protected function execute(InputInterface $input, OutputInterface $output)
 	{
 		parent::execute($input, $output);
-		$stock = $input->getArgument('stock');
-		$account = $input->getArgument('account');
 		$last = 0; // Last time we purchased.
 
 		// Get a quote for the stock.
 		$output->write('Getting asking price for the stock... ');
-		$quote = $this->stock($input)->quote();
+		$quote = $this->stock()->quote();
 		if (!$quote || !$quote->last) {
 			$output->writeln('<error>Failed.</error>');
 			exit;
@@ -57,37 +38,20 @@ class ChockABlock extends Command
 		$target_price = $quote->last;
 		$output->writeln('<info>' . $target_price . '</info>');
 
-		// Connect to the websockets.
-		$output->write('Connecting to websockets... ');
-		$websocket = $this->stockfighter->getWebSocketCommunicator()->quotes($account,
-			$input->getArgument('venue'), $stock);
-		$websocket->connect();
-		$output->writeln('<info>ok.</info>');
-
+		// Prepare the variables.
 		$stocks_left = self::STOCKS_TO_PURCHASE;
-
-		// Wait until we have a quote within the threshold.
 		$output->writeln('Waiting for quote to drop below threshold...');
-		while (true) {
 
-			if ($stocks_left <= 0) break;
-
-			// Receive a quote.
-			$quote = null;
-			try {
-				$quote = $websocket->receive();
-			} catch (ConnectionException $ex) {
-				$output->writeln('<comment>Connection lost. Reconnecting...</comment>');
-				$websocket->connect();
-				continue;
-			}
+		// Connect to websockets.
+		$this->quotes($output, function (Quote $quote) use (&$stocks_left, &$last, $target_price, $output) {
+			if ($stocks_left <= 0) return true;
 			if ($quote->last <= $target_price + self::LAST_THRESHOLD && microtime(true) > $last + self::WAIT) {
 				$to_purchase = $stocks_left > self::STOCKS_PER_PURCHASE ? self::STOCKS_PER_PURCHASE : $stocks_left;
 				$order = $this->order($output, 0, $to_purchase);
 				$stocks_left -= $order->totalFilled;
 				$last = microtime(true);
 			}
-
-		}
+			return false;
+		});
 	}
 }

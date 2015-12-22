@@ -6,7 +6,6 @@ use Marks\Stockfighter\Objects\Quote;
 use Marks\StockfighterSolution\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
-use WebSocket\ConnectionException;
 
 class ChockABlock extends Command
 {

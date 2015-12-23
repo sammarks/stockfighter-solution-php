@@ -16,10 +16,8 @@ class SellSide extends Command
 			->setDescription('Run the sell-side solution (level 3).');
 	}
 
-	protected function execute(InputInterface $input, OutputInterface $output)
+	protected function conduct(InputInterface $input, OutputInterface $output)
 	{
-		parent::execute($input, $output);
-
 
 	}
 }

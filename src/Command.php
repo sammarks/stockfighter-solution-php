@@ -10,10 +10,11 @@ use Symfony\Component\Console\Command\Command as SymfonyCommand;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
-use WebSocket\ConnectionException;
 
-class Command extends SymfonyCommand
+abstract class Command extends SymfonyCommand
 {
+	const MAX_ORDER_ATTEMPTS = 10;
+
 	/**
 	 * The Stockfighter instance.
 	 * @var Stockfighter
@@ -88,7 +89,29 @@ class Command extends SymfonyCommand
 			$output->writeln('Nope :(');
 			throw new StockfighterSolutionException('The venue ' . $this->venue . ' is down or does not exist.');
 		}
+
+		// Run the inner execution.
+		$result = $this->conduct($input, $output);
+		if ($result !== null) { return $result; }
+
+		// Run the loop.
+		$this->stockfighter->run();
+		return 0; // For success.
 	}
+
+	/**
+	 * Let's find another synonym for run (there already exists a run method, and an execute
+	 * method)! This does the actual running of the current command. Once this is called,
+	 * the event loop is started.
+	 *
+	 * If this returns anything, the loop is not started and the application is aborted.
+	 *
+	 * @param InputInterface  $input
+	 * @param OutputInterface $output
+	 *
+	 * @return mixed
+	 */
+	protected abstract function conduct(InputInterface $input, OutputInterface $output);
 
 	/**
 	 * Gets the application (just like the parent class, except
@@ -162,25 +185,69 @@ class Command extends SymfonyCommand
 	 *
 	 * @return Order|null
 	 */
-	protected function order(OutputInterface $output, $price, $quantity, $direction = Order::DIRECTION_BUY, $order_type = Order::ORDER_MARKET)
+	protected function order(OutputInterface $output, $price, $quantity, $direction = Order::DIRECTION_BUY, $order_type = Order::ORDER_LIMIT)
 	{
 		$output->write('Purchasing ' . $quantity . ' shares of ' . $this->stock . '...');
 		$filled = 0;
 		$order = null;
-		while ($filled === 0) {
+		$attempts = 0;
+		while ($filled === 0 && $attempts < self::MAX_ORDER_ATTEMPTS) {
+			$attempts++;
 			$output->write('.');
 			try {
 				$order = $this->stock()->order($this->account, $price,
 					$quantity, $direction, $order_type);
 			} catch (StockfighterRequestException $ex) {
-				$output->writeln('<error>Failed.</error>');
+				$output->writeln('<error> failed.</error>');
 				print_r($ex->body);
 				break;
 			}
 			$filled = $order->totalFilled;
 		}
-		$output->writeln('<info> ' . $filled . ' filled.</info>');
+		if ($filled === 0) {
+			$output->writeln('<comment> timeout.</comment>');
+		} else {
+			$output->writeln('<info> ' . $filled . ' filled.</info>');
+		}
 		return $order;
+	}
+
+	/**
+	 * Order a stock (asynchronously).
+	 *
+	 * @param int             $price
+	 * @param int             $quantity
+	 * @param string          $direction
+	 * @param string          $order_type
+	 *
+	 * @return \GuzzleHttp\Promise\PromiseInterface
+	 */
+	protected function orderAsync($price, $quantity, $direction = Order::DIRECTION_BUY, $order_type = Order::ORDER_LIMIT)
+	{
+		$attempts = 0;
+
+		$callback = function (Order $order) use (&$attempts, &$callback, $price, $quantity, $direction, $order_type) {
+			$attempts++;
+			if ($order->totalFilled > 0) {
+				return $order;
+			} elseif ($attempts < self::MAX_ORDER_ATTEMPTS) {
+				return $this->stock()->orderAsync($this->account, $price, $quantity, $direction, $order_type)
+					->then($callback);
+			} else {
+				throw new \Exception('The order timed out.');
+			}
+		};
+
+		return $this->orderInterior($callback, $price, $quantity, $direction, $order_type);
+	}
+
+	private function orderInterior($callback, $price, $quantity, $direction = Order::DIRECTION_BUY, $order_type = Order::ORDER_LIMIT)
+	{
+		return $this->stock()
+			->orderAsync($this->account, $price, $quantity, $direction, $order_type)
+			->then($callback, function (StockfighterRequestException $ex) {
+				print_r($ex->body);
+			});
 	}
 
 	/**
@@ -190,34 +257,15 @@ class Command extends SymfonyCommand
 	 * If $received_callback returns anything that evaluates to true,
 	 * the returned result is returned from this method.
 	 *
-	 * @param OutputInterface $output
 	 * @param callable        $received_callback
 	 *
 	 * @return mixed
 	 */
-	protected function quotes(OutputInterface $output, callable $received_callback)
+	protected function quotes(callable $received_callback)
 	{
-		$output->write('Connecting to websockets... ');
 		$websocket = $this->stockfighter->getWebSocketCommunicator()
 			->quotes($this->account, $this->venue, $this->stock);
+		$websocket->receive($received_callback);
 		$websocket->connect();
-		$output->writeln('<info>ok.</info>');
-
-		while (true) {
-			$quote = null;
-			try {
-				$quote = $websocket->receive();
-			} catch (ConnectionException $ex) {
-				$output->writeln('<comment>Connection lost. Reconnecting...</comment>');
-				$websocket->connect();
-				continue;
-			}
-			$result = $received_callback($quote);
-			if ($result) {
-				return $result; // Return the result if we have one.
-			}
-		}
-
-		return null;
 	}
 }

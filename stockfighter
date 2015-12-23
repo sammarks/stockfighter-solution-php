@@ -7,6 +7,7 @@ require __DIR__ . '/vendor/autoload.php';
 // Included classes.
 use Marks\StockfighterSolution\Application;
 use Marks\StockfighterSolution\Levels\ChockABlock;
+use Marks\StockfighterSolution\Levels\SellSide;
 use Configula\Config;
 
 // Load the configuration.
@@ -19,6 +20,7 @@ $config = new Config(__DIR__ . '/config');
 $application = new Application('Stockfighter Solutions');
 $application->setConfig($config);
 $application->add(new ChockABlock());
+$application->add(new SellSide());
 $application->run();
 
 ?>

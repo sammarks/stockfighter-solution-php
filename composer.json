@@ -4,9 +4,16 @@
             "Marks\\StockfighterSolution\\": "src/"
         }
     },
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/rb-cohen/phpws"
+        }
+    ],
     "require": {
         "sammarks/stockfighter": "dev-master",
         "symfony/console": "^3.0",
-        "caseyamcl/Configula": "^2.4"
+        "caseyamcl/Configula": "^2.4",
+        "devristo/phpws": "dev-master"
     }
 }

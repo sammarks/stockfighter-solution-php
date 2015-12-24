@@ -224,28 +224,9 @@ abstract class Command extends SymfonyCommand
 	 */
 	protected function orderAsync($price, $quantity, $direction = Order::DIRECTION_BUY, $order_type = Order::ORDER_LIMIT)
 	{
-		$attempts = 0;
-
-		$callback = function (Order $order) use (&$attempts, &$callback, $price, $quantity, $direction, $order_type) {
-			$attempts++;
-			if ($order->totalFilled > 0) {
-				return $order;
-			} elseif ($attempts < self::MAX_ORDER_ATTEMPTS) {
-				return $this->stock()->orderAsync($this->account, $price, $quantity, $direction, $order_type)
-					->then($callback);
-			} else {
-				throw new \Exception('The order timed out.');
-			}
-		};
-
-		return $this->orderInterior($callback, $price, $quantity, $direction, $order_type);
-	}
-
-	private function orderInterior($callback, $price, $quantity, $direction = Order::DIRECTION_BUY, $order_type = Order::ORDER_LIMIT)
-	{
 		return $this->stock()
 			->orderAsync($this->account, $price, $quantity, $direction, $order_type)
-			->then($callback, function (StockfighterRequestException $ex) {
+			->otherwise(function (StockfighterRequestException $ex) {
 				print_r($ex->body);
 			});
 	}
@@ -257,15 +238,16 @@ abstract class Command extends SymfonyCommand
 	 * If $received_callback returns anything that evaluates to true,
 	 * the returned result is returned from this method.
 	 *
-	 * @param callable        $received_callback
+	 * @param callable $received_callback
+	 * @param callable $error_callback
 	 *
 	 * @return mixed
 	 */
-	protected function quotes(callable $received_callback)
+	protected function quotes(callable $received_callback, callable $error_callback)
 	{
 		$websocket = $this->stockfighter->getWebSocketCommunicator()
 			->quotes($this->account, $this->venue, $this->stock);
-		$websocket->receive($received_callback);
+		$websocket->receive($received_callback, $error_callback);
 		$websocket->connect();
 	}
 }

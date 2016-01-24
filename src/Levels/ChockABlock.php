@@ -5,6 +5,7 @@ namespace Marks\StockfighterSolution\Levels;
 use Marks\Stockfighter\Objects\Execution;
 use Marks\Stockfighter\Objects\Order;
 use Marks\Stockfighter\Objects\Quote;
+use Marks\Stockfighter\WebSocket\WebSocket;
 use Marks\StockfighterSolution\Command;
 use Marks\StockfighterSolution\OrderTracker;
 use Marks\StockfighterSolution\ProgressBar;
@@ -13,8 +14,11 @@ use Symfony\Component\Console\Output\OutputInterface;
 
 class ChockABlock extends Command
 {
-	const STOCKS_PER_PURCHASE = 2000;
+	const PURCHASE_MIN = 2000;
+	const PURCHASE_MAX = 20000;
 	const STOCKS_TO_PURCHASE = 100000;
+	const COOLDOWN_MIN = 3; // In seconds.
+	const COOLDOWN_MAX = 10;
 	const LAST_THRESHOLD = 100;
 
 	protected function configure()
@@ -29,6 +33,7 @@ class ChockABlock extends Command
 	{
 		// Prepare the progress bar.
 		$progress = new ProgressBar($output, self::STOCKS_TO_PURCHASE);
+		$root = $this;
 
 		// Get a quote for the stock.
 		$output->write('Getting asking price for the stock... ');
@@ -42,7 +47,9 @@ class ChockABlock extends Command
 
 		// Prepare the variables.
 		$stocks_left = self::STOCKS_TO_PURCHASE;
-		$pending_purchases = 0;
+		$pending_order = false;
+		$last_activity = 0;
+		$cooldown = 0;
 		$output->writeln('Waiting for quote to drop below threshold...');
 
 		// Start the progress bar.
@@ -52,13 +59,15 @@ class ChockABlock extends Command
 		$tracker = new OrderTracker();
 
 		// Setup the events.
-		$tracker->on('executed', function (Execution $execution) use (&$stocks_left, &$pending_purchases, $progress) {
+		$tracker->on('executed', function (Execution $execution) use (&$stocks_left, &$last_activity, $progress) {
 			$stocks_left -= $execution->filled;
-			$pending_purchases -= $execution->filled;
+			$last_activity = microtime(true);
 			$progress->setProgress(self::STOCKS_TO_PURCHASE - $stocks_left);
 			$progress->setMessage('<info>+' . $execution->filled . '</info>');
 		});
-		$tracker->on('complete', function (Order $order) use ($progress) {
+		$tracker->on('complete', function (Order $order) use ($progress, &$last_activity, &$pending_order) {
+			$pending_order = false;
+			$last_activity = microtime(true);
 			$progress->setMessage('<info>Complete (' . $order->id . ')</info>');
 		});
 
@@ -68,38 +77,53 @@ class ChockABlock extends Command
 		$executions_socket = $communicator->executions($this->account, $this->venue, $this->stock);
 
 		// Attach the quotes websocket events.
-		$quotes_socket->receive(function (Quote $quote) use ($stocks_left, &$pending_purchases, $target_price, $progress, $tracker) {
+		$quotes_socket->on('message', function (WebSocket $client, Quote $quote) use ($stocks_left, &$last_activity, &$cooldown, &$pending_order, $target_price, $progress, $tracker, $root) {
 
-			if ($stocks_left <= 0) return true; // Cancel if we don't have any more stocks to purchase.
+			if ($stocks_left <= 0) {
+				$client->close();
+				return; // Cancel if we don't have any more stocks to purchase.
+			}
+			if ($pending_order) return; // Skip this quote if we have an unfilled order.
+			if (microtime(true) - $last_activity <= $cooldown) return; // Don't order if we're not past the cooldown.
+			$cooldown = rand(self::COOLDOWN_MIN, self::COOLDOWN_MAX);
+			$last_activity = microtime(true);
 
 			// Don't process this quote if it's too expensive.
-			if ($quote->last > $target_price + self::LAST_THRESHOLD) return false;
+			if ($quote->last > $target_price + self::LAST_THRESHOLD) return;
 
 			// Get the number of stocks to purchase.
-			$stocks_minus_pending = $stocks_left - $pending_purchases;
-			$to_purchase = ($stocks_minus_pending > self::STOCKS_PER_PURCHASE) ?
-				self::STOCKS_PER_PURCHASE : $stocks_minus_pending;
-			if ($to_purchase <= 0) return true; // Cancel if we don't have any to purhcase.
+			$per_purchase = rand(self::PURCHASE_MIN, self::PURCHASE_MAX);
+			$to_purchase = ($stocks_left > $per_purchase) ?
+				$per_purchase : $stocks_left;
+			if ($to_purchase <= 0) {
+				$client->close();
+				return; // Close if we don't have any more stocks to purchase.
+			}
 
 			// Purchase the stock.
-			$pending_purchases += $to_purchase;
-			$this->orderAsync($quote->last, $to_purchase)
-				->then(function (Order $order) use ($tracker, $progress) {
-					$progress->setMessage('Purchasing @ $' . $order->price / 100);
+			$root->orderAsync($target_price, $to_purchase)
+				->then(function (Order $order) use ($tracker, $to_purchase, $progress, &$pending_order) {
+					$pending_order = true;
+					$progress->setMessage('Purchasing ' . $to_purchase . ' @ $' . $order->price / 100);
 					$tracker->track($order); // Track the order.
 				}, function () use ($progress) {
 					$progress->setMessage('<comment>purchase fail</comment>');
 				});
 
-		}, function () use ($progress) {
+		});
+		$quotes_socket->on('error', function () use ($progress) {
 			$progress->setMessage('<comment>fail</comment>');
 		});
 
 		// Attach to the executions websocket events.
-		$executions_socket->receive(function (Execution $execution) use ($stocks_left, $tracker) {
-			if ($stocks_left <= 0) return true; // Cancel if we don't have any more stocks to monitor.
+		$executions_socket->on('message', function (WebSocket $client, Execution $execution) use ($stocks_left, $tracker) {
+			if ($stocks_left <= 0) {
+				$client->close();
+				return;
+			}
 			$tracker->executed($execution);
-		}, function () use ($progress) {
+		});
+		$executions_socket->on('error', function () use ($progress) {
 			$progress->setMessage('<comment>executions fail</comment>');
 		});
 

@@ -4,14 +4,8 @@
             "Marks\\StockfighterSolution\\": "src/"
         }
     },
-    "repositories": [
-        {
-            "type": "vcs",
-            "url": "https://github.com/sammarks/phpws"
-        }
-    ],
     "require": {
-        "sammarks/stockfighter": "dev-master",
+        "sammarks/stockfighter": "dev-node-websocket",
         "symfony/console": "^3.0",
         "caseyamcl/Configula": "^2.4"
     },

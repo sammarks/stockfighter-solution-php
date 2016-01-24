@@ -230,24 +230,4 @@ abstract class Command extends SymfonyCommand
 				print_r($ex->body);
 			});
 	}
-
-	/**
-	 * Creates a websocket connection and listens for quotes, calling
-	 * $received_callback every time a new quote is received.
-	 *
-	 * If $received_callback returns anything that evaluates to true,
-	 * the returned result is returned from this method.
-	 *
-	 * @param callable $received_callback
-	 * @param callable $error_callback
-	 *
-	 * @return mixed
-	 */
-	protected function quotes(callable $received_callback, callable $error_callback)
-	{
-		$websocket = $this->stockfighter->getWebSocketCommunicator()
-			->quotes($this->account, $this->venue, $this->stock);
-		$websocket->receive($received_callback, $error_callback);
-		$websocket->connect();
-	}
 }
